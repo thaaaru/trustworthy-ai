@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Microsoft Office temp files
+~$*.pptx
+~$*.docx
+~$*.xlsx
+.~*
+
+# AAOS workflow state (keep in repo but mark as local)
+.aaos/STATE.json
+.aaos/evidence/*
+!.aaos/evidence/.gitkeep
+
+# Node modules (if using JS tools)
+node_modules/
+package-lock.json
+
+# Temporary extraction directories
+.extract/
+.tmp/
+
+# Secrets and credentials (NEVER commit)
+secrets.json
+credentials.json
+*.key
+*.pem
+*.p12
