@@ -226,7 +226,196 @@ trustworthy-ai/
     ├── Slide 6–12: Agentic AI as compliance orchestration
     ├── Slide 13–17: Implementation roadmap & ROI
     └── (17 slides total, ~45 min executive briefing)
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+
+- **Python 3.10+** (3.11+ recommended for performance)
+- **Git** (for version control and CI/CD integration)
+- **PostgreSQL 14+** (optional, for multi-tenant deployments; SQLite for single-user dev)
+- **Docker** (optional, for containerized deployments and sandboxed execution)
+
+### Step 1: Clone or Fork This Repository
+
+```bash
+git clone https://github.com/thaaaru/trustworthy-ai.git
+cd trustworthy-ai
 ```
+
+### Step 2: Extract AAOS Lite Workflow
+
+```bash
+unzip AAOS_Lite_Workflow_0.3.zip -d ./aaos-workflow
+cd aaos-workflow
+```
+
+Verify extraction:
+```bash
+ls -la
+# Expected output:
+# - AAOS.md (agent constitution)
+# - README.md (implementation guide)
+# - aaos.py (CLI controller)
+# - workflow.json (lifecycle state machine)
+# - controls/ (policy templates)
+# - templates/ (evidence templates)
+# - tests/ (test suite)
+```
+
+### Step 3: Extract AAOS Lite Runtime
+
+```bash
+cd ..
+unzip aaos-lite-runtime-main.zip
+cd aaos-lite-runtime-main
+```
+
+Verify extraction:
+```bash
+ls -la
+# Expected output:
+# - aaos_lite/ (Python package)
+# - examples/ (usage examples)
+# - requirements.txt (dependencies)
+# - README.md (runtime docs)
+```
+
+### Step 4: Set Up Python Environment
+
+```bash
+# Create virtual environment
+python3.11 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Upgrade pip
+pip install --upgrade pip
+
+# Install runtime dependencies
+pip install -r requirements.txt
+```
+
+**Core Dependencies:**
+- `pydantic>=2.0` — Strict schema validation (tools, inputs, outputs)
+- `langchain>=0.1` — LLM orchestration framework
+- `langfuse>=2.0` — Tracing and observability
+- `python-dotenv` — Environment variable management
+- `postgresql-psycopg` (optional) — Multi-tenant database
+- `opentelemetry-*` (optional) — Distributed tracing
+
+### Step 5: Configure Environment Variables
+
+Create a `.env` file in the project root:
+
+```bash
+# Required
+ANTHROPIC_API_KEY=sk-ant-...              # Claude API key
+
+# Optional but recommended
+LANGFUSE_PUBLIC_KEY=pk-lf-...             # Langfuse tracing
+LANGFUSE_SECRET_KEY=sk-lf-...
+
+# Database (for multi-tenant)
+DATABASE_URL=postgresql://user:pass@localhost/trustworthy_ai
+
+# Observability
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+
+# Tool integrations (optional)
+TICKET_SYSTEM_API_KEY=...                 # For tool examples
+```
+
+⚠️ **Never commit `.env` to git.** Use a secrets manager in production (AWS Secrets Manager, HashiCorp Vault, etc.).
+
+### Step 6: Verify Installation
+
+```bash
+# Test AAOS CLI
+cd ../aaos-workflow
+python aaos.py status
+# Expected: "Workflow not initialized" or similar (this is normal)
+
+# Test Python runtime
+cd ../aaos-lite-runtime-main
+python -c "from aaos_lite import runtime; print('✓ AAOS Lite runtime loaded')"
+```
+
+### Step 7: (Optional) Set Up PostgreSQL for Multi-Tenant Mode
+
+```bash
+# Create database
+createdb trustworthy_ai
+
+# Run migrations (if present)
+psql -U postgres -d trustworthy_ai -a -f ./migrations/001_init.sql
+
+# Verify connection
+psql trustworthy_ai -c "SELECT version();"
+```
+
+### Step 8: (Optional) Configure GitHub Actions for CI/CD
+
+Copy the workflow enforcement file:
+
+```bash
+mkdir -p .github/workflows
+cp aaos-workflow/.github/workflows/aaos.yml .github/workflows/
+```
+
+This enforces AAOS workflow progression on all pull requests.
+
+---
+
+## Docker Deployment (Optional)
+
+For containerized deployments:
+
+```bash
+# Build image
+docker build -t trustworthy-ai:latest .
+
+# Run container with environment file
+docker run --env-file .env.prod \
+  -p 8000:8000 \
+  -v ./aaos-workflow/.aaos:/app/.aaos \
+  trustworthy-ai:latest
+```
+
+**Example Dockerfile** (add to repo root):
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy runtime
+COPY aaos-lite-runtime-main/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY aaos-lite-runtime-main/aaos_lite ./aaos_lite
+COPY aaos-workflow ./aaos-workflow
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "aaos_lite.runtime:app", "--host", "0.0.0.0"]
+```
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `ModuleNotFoundError: No module named 'aaos_lite'` | Ensure virtual environment is activated and `pip install -r requirements.txt` completed |
+| `ANTHROPIC_API_KEY not found` | Create `.env` file with key; run `source .env` or use `python-dotenv` |
+| `psycopg connection failed` | Verify PostgreSQL is running; check `DATABASE_URL` in `.env` |
+| `aaos.py: command not found` | Run `python aaos.py` instead of `aaos.py` directly |
+| Permission denied on `.aaos/` directory | Run `chmod -R 755 .aaos/` or check file ownership |
+
+---
 
 ---
 
