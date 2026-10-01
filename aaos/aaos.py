@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+"""AAOS Lite - a governed agent runtime in one file, standard library only.
+
+Two halves, one state machine:
+  * control plane - PLAN -> BUILD -> VERIFY -> RELEASE, gated by required files,
+    allow-listed checks, and human approval bound to an evidence digest.
+  * agent loop    - runs configured agents against a task; proposed shell
+    commands are deny-list filtered and require per-command human approval.
+
+Everything is stored under .aaos/ next to this file: STATE.json (current gate),
+LEDGER.jsonl (append-only history), evidence/ (check output), runs/ (agent output).
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+CONFIG = ROOT / "aaos.json"
+DIR = ROOT / ".aaos"
+STATE = DIR / "STATE.json"
+LEDGER = DIR / "LEDGER.jsonl"
+EVIDENCE = DIR / "evidence"
+RUNS = DIR / "runs"
+
+TASK_TEMPLATE = """# Task
+
+Task-ID: PROJECT-001
+Owner: [name or role]
+Approver: [name or role]
+Risk-Tier: MEDIUM
+
+## Requested outcome
+
+[Observable outcome, not an implementation guess]
+
+## In scope
+
+- [Explicit target]
+
+## Out of scope
+
+- Production systems, credentials, network access, irreversible actions
+
+## Acceptance criteria
+
+- AC-01: [measurable outcome]
+- AC-02: [measurable security or quality condition]
+"""
+
+RELEASE_TEMPLATE = """# Release
+
+Task-ID: PROJECT-001
+Change: [what ships]
+Verification: [evidence referenced from .aaos/evidence]
+Rollback: [exact command or procedure]
+"""
+
+
+# --- storage -----------------------------------------------------------------
+
+def now() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"ERROR: cannot read {path}: {exc}")
+
+
+def write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def log(event: str, **fields) -> None:
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with LEDGER.open("a", encoding="utf-8") as out:
+        out.write(json.dumps({"at": now(), "event": event, **fields}, sort_keys=True) + "\n")
+
+
+def config() -> dict:
+    cfg = read_json(CONFIG)
+    if cfg.get("initial_stage") not in cfg.get("stages", {}):
+        raise SystemExit("ERROR: initial_stage is not a declared stage")
+    return cfg
+
+
+def state(cfg: dict) -> dict:
+    if not STATE.exists():
+        raise SystemExit("ERROR: not initialized; run: python3 aaos.py init")
+    value = read_json(STATE)
+    if value.get("stage") not in cfg["stages"]:
+        raise SystemExit(f"ERROR: unknown stage {value.get('stage')!r}")
+    return value
+
+
+def gate(cfg: dict, value: dict) -> dict:
+    return cfg["stages"][value["stage"]]
+
+
+# --- gate validation ---------------------------------------------------------
+
+def required_files(rule: dict) -> list[Path]:
+    return [DIR / name for name in rule.get("requires", [])]
+
+
+def digest(paths: list[Path]) -> str:
+    acc = hashlib.sha256()
+    for path in sorted(paths):
+        acc.update(path.name.encode())
+        acc.update(path.read_bytes() if path.is_file() else b"")
+    return acc.hexdigest()
+
+
+def controlled(rule: dict, value: dict) -> list[Path]:
+    passed = [ROOT / item["path"] for item in value.get("evidence", []) if (ROOT / item["path"]).is_file()]
+    return required_files(rule) + passed
+
+
+def validate(cfg: dict, value: dict) -> list[str]:
+    rule, errors = gate(cfg, value), []
+    for path in required_files(rule):
+        if not path.is_file() or not path.read_text(encoding="utf-8").strip():
+            errors.append(f"missing or empty: .aaos/{path.name}")
+    done = {item["name"] for item in value.get("evidence", []) if item["status"] == "PASS"}
+    for name in rule.get("checks", []):
+        if name not in done:
+            errors.append(f"check not passed: {name}")
+    if rule.get("approval"):
+        approval = value.get("approval")
+        if not approval or approval.get("decision") != "approve":
+            errors.append(f"approval required at {value['stage']}")
+        elif approval.get("evidence_digest") != digest(controlled(rule, value)):
+            errors.append("approval stale: controlled files changed since approval")
+    return errors
+
+
+# --- model access ------------------------------------------------------------
+
+MOCK = {
+    "architect": "PLAN\n- Assumption: task text is the full contract.\n- Deliverable: smallest change meeting the acceptance criteria.\n- Boundary: repository only, no network, no secrets.",
+    "developer": "IMPLEMENTATION\n- Create the workspace and a stub artifact.\nPROPOSED_COMMANDS:\nmkdir -p workspace\necho generated by aaos > workspace/NOTES.md",
+    "reviewer": "REVIEW\n- Change is confined to workspace/ and is reversible by deleting it.\n- No credential or network access proposed.\n- Residual risk: LOW.",
+}
+
+
+def complete(cfg: dict, agent: dict, prompt: str) -> str:
+    model = cfg.get("model", {})
+    provider = model.get("provider", "mock")
+    if provider == "mock":
+        return MOCK.get(agent["name"], f"Mock output for {agent['name']}.")
+    if provider != "openai_compatible":
+        raise SystemExit(f"ERROR: unsupported model provider {provider!r}")
+    key = os.getenv(model.get("api_key_env", "AAOS_API_KEY"), "")
+    if not key:
+        raise SystemExit(f"ERROR: set {model.get('api_key_env', 'AAOS_API_KEY')} for provider openai_compatible")
+    body = json.dumps({
+        "model": model["name"],
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": f"You are the {agent['name']} agent. {agent['prompt']}"},
+            {"role": "user", "content": prompt},
+        ],
+    }).encode()
+    request = urllib.request.Request(
+        model["base_url"].rstrip("/") + "/v1/chat/completions",
+        data=body,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:  # noqa: S310 - operator-supplied endpoint
+        return json.loads(response.read())["choices"][0]["message"]["content"]
+
+
+# --- agent tool use ----------------------------------------------------------
+
+def proposed_commands(text: str) -> list[str]:
+    if "PROPOSED_COMMANDS:" not in text:
+        return []
+    tail = text.split("PROPOSED_COMMANDS:", 1)[1]
+    return [line.strip() for line in tail.splitlines() if line.strip()]
+
+
+def denied(cfg: dict, command: str) -> str | None:
+    for pattern in cfg.get("denied_command_patterns", []):
+        if pattern.lower() in command.lower():
+            return pattern
+    return None
+
+
+def execute(cfg: dict, commands: list[str], agent_name: str, assume_no: bool) -> None:
+    for command in commands:
+        hit = denied(cfg, command)
+        if hit:
+            print(f"BLOCKED ({hit}): {command}")
+            log("COMMAND_BLOCKED", agent=agent_name, command=command, pattern=hit)
+            continue
+        answer = "n" if assume_no else input(f"Approve: {command}\n  run it? [y/N] ").strip().lower()
+        if answer != "y":
+            print(f"SKIPPED: {command}")
+            log("COMMAND_SKIPPED", agent=agent_name, command=command)
+            continue
+        result = subprocess.run(command, shell=True, text=True, capture_output=True)  # noqa: S602 - human approved
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        log("COMMAND_RAN", agent=agent_name, command=command, exit_code=result.returncode)
+
+
+# --- commands ----------------------------------------------------------------
+
+def cmd_init(cfg: dict, args) -> None:
+    if STATE.exists():
+        raise SystemExit("ERROR: already initialized")
+    EVIDENCE.mkdir(parents=True)
+    RUNS.mkdir(parents=True)
+    (DIR / "TASK.md").write_text(TASK_TEMPLATE, encoding="utf-8")
+    (DIR / "RELEASE.md").write_text(RELEASE_TEMPLATE, encoding="utf-8")
+    value = {"version": cfg["version"], "stage": cfg["initial_stage"], "attempts": {}, "evidence": [], "approval": None, "updated_at": now()}
+    write_json(STATE, value)
+    log("INITIALIZED", stage=value["stage"])
+    print(f"Initialized at {value['stage']}. Fill in .aaos/TASK.md next.")
+
+
+def cmd_status(cfg: dict, args) -> None:
+    value = state(cfg)
+    rule = gate(cfg, value)
+    print(json.dumps({
+        "stage": value["stage"],
+        "next": rule.get("next"),
+        "approval_required": rule.get("approval", False),
+        "approval": value.get("approval"),
+        "required_checks": rule.get("checks", []),
+        "evidence": value.get("evidence", []),
+        "blockers": validate(cfg, value),
+    }, indent=2))
+
+
+def cmd_check(cfg: dict, args) -> None:
+    value = state(cfg)
+    names = gate(cfg, value).get("checks", [])
+    if not names:
+        raise SystemExit(f"ERROR: no checks configured for {value['stage']}")
+    value["approval"] = None
+    value["evidence"] = [item for item in value["evidence"] if item["name"] not in names]
+    failed = False
+    for name in names:
+        spec = cfg["checks"][name]
+        attempts = value.setdefault("attempts", {})
+        attempts[name] = attempts.get(name, 0) + 1
+        if attempts[name] > cfg["max_check_attempts"]:
+            print(f"FAIL: {name} (retry limit exceeded)")
+            failed = True
+            continue
+        try:
+            result = subprocess.run(spec["command"], cwd=ROOT.parent, capture_output=True, text=True,
+                                    timeout=spec.get("timeout_seconds", 120), shell=False)
+            ok = result.returncode in spec.get("pass_exit_codes", [0])
+            output, code = result.stdout + result.stderr, result.returncode
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            ok, output, code = False, str(exc), -1
+        status = "PASS" if ok else "FAIL"
+        artifact = EVIDENCE / f"{value['stage'].lower()}-{name}-{attempts[name]}.txt"
+        artifact.write_text(f"check: {name}\nstatus: {status}\nexit_code: {code}\n"
+                            f"command: {json.dumps(spec['command'])}\n\n{output[-100000:]}", encoding="utf-8")
+        item = {"name": name, "status": status, "path": str(artifact.relative_to(ROOT)),
+                "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(), "at": now()}
+        value["evidence"].append(item)
+        log("CHECK", stage=value["stage"], **item)
+        print(f"{status}: {name}")
+        failed |= not ok
+    value["updated_at"] = now()
+    write_json(STATE, value)
+    if failed:
+        raise SystemExit(1)
+
+
+def cmd_approve(cfg: dict, args) -> None:
+    value = state(cfg)
+    rule = gate(cfg, value)
+    if not rule.get("approval"):
+        raise SystemExit(f"ERROR: approval not required at {value['stage']}")
+    record = {"stage": value["stage"], "decision": args.decision, "by": args.by, "note": args.note,
+              "at": now(), "evidence_digest": digest(controlled(rule, value))}
+    value["approval"] = record
+    value["updated_at"] = now()
+    write_json(STATE, value)
+    log("APPROVAL", **record)
+    print(f"Recorded {args.decision} for {value['stage']} by {args.by}")
+
+
+def cmd_advance(cfg: dict, args) -> None:
+    value = state(cfg)
+    rule = gate(cfg, value)
+    errors = validate(cfg, value)
+    if errors:
+        print("\n".join(f"BLOCKED: {item}" for item in errors))
+        raise SystemExit(1)
+    if not rule.get("next"):
+        raise SystemExit(f"ERROR: {value['stage']} is terminal")
+    before = value["stage"]
+    value.update({"stage": rule["next"], "approval": None, "evidence": [], "attempts": {}, "updated_at": now()})
+    write_json(STATE, value)
+    log("TRANSITION", **{"from": before, "to": value["stage"]})
+    print(f"Advanced: {before} -> {value['stage']}")
+
+
+def cmd_recover(cfg: dict, args) -> None:
+    value = state(cfg)
+    if value["stage"] not in {"VERIFY", "RELEASE"}:
+        raise SystemExit("ERROR: recovery is allowed only from VERIFY or RELEASE")
+    before = value["stage"]
+    value.update({"stage": "BUILD", "approval": None, "evidence": [], "attempts": {}, "updated_at": now()})
+    write_json(STATE, value)
+    log("RECOVERY", reason=args.reason, **{"from": before, "to": "BUILD"})
+    print(f"Recovered: {before} -> BUILD")
+
+
+def cmd_run(cfg: dict, args) -> None:
+    value = state(cfg)
+    if value["stage"] != "BUILD":
+        raise SystemExit(f"ERROR: agents run at BUILD, current stage is {value['stage']}")
+    task = Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task
+    if not task or not task.strip():
+        raise SystemExit("ERROR: empty task")
+    run_dir = RUNS / dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "task.md").write_text(task, encoding="utf-8")
+    context = f"MISSION:\n{cfg['mission']}\n\nTASK:\n{task}\n"
+    log("RUN_STARTED", run=run_dir.name)
+    for agent in cfg["agents"]:
+        print(f"\n=== {agent['name']} ===")
+        output = complete(cfg, agent, context)
+        print(output)
+        (run_dir / f"{agent['name']}.md").write_text(output, encoding="utf-8")
+        if agent.get("run_tools"):
+            execute(cfg, proposed_commands(output), agent["name"], args.no_tools)
+        context += f"\nOUTPUT FROM {agent['name']}:\n{output}\n"
+    log("RUN_FINISHED", run=run_dir.name)
+    print(f"\nRun saved: {run_dir.relative_to(ROOT)}")
+
+
+def cmd_history(cfg: dict, args) -> None:
+    print(LEDGER.read_text(encoding="utf-8").rstrip() if LEDGER.exists() else "No history")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AAOS Lite - governed agent runtime")
+    commands = parser.add_subparsers(required=True, dest="cmd")
+    for name, function, help_text in (
+        ("init", cmd_init, "create .aaos/ with templates and the initial stage"),
+        ("status", cmd_status, "show stage, evidence, and current blockers"),
+        ("check", cmd_check, "run the allow-listed checks for this stage"),
+        ("advance", cmd_advance, "move to the next stage if the gate passes"),
+        ("history", cmd_history, "print the append-only ledger"),
+    ):
+        commands.add_parser(name, help=help_text).set_defaults(func=function)
+    item = commands.add_parser("approve", help="record a human decision for this stage")
+    item.add_argument("--by", required=True)
+    item.add_argument("--decision", choices=["approve", "reject"], required=True)
+    item.add_argument("--note", required=True)
+    item.set_defaults(func=cmd_approve)
+    item = commands.add_parser("recover", help="return to BUILD from VERIFY or RELEASE")
+    item.add_argument("--reason", required=True)
+    item.set_defaults(func=cmd_recover)
+    item = commands.add_parser("run", help="run the agent chain against a task")
+    item.add_argument("task", nargs="?", default="")
+    item.add_argument("--task-file")
+    item.add_argument("--no-tools", action="store_true", help="never execute proposed commands")
+    item.set_defaults(func=cmd_run)
+    args = parser.parse_args()
+    args.func(config(), args)
+
+
+if __name__ == "__main__":
+    main()

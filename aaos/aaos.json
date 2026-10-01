@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "mission": "Build software with governed agents: every consequential action is approved, evidenced, and reversible.",
+  "initial_stage": "PLAN",
+  "max_check_attempts": 3,
+  "stages": {
+    "PLAN": {"next": "BUILD", "requires": ["TASK.md"], "approval": true, "checks": []},
+    "BUILD": {"next": "VERIFY", "requires": ["TASK.md"], "approval": false, "checks": []},
+    "VERIFY": {"next": "RELEASE", "requires": ["TASK.md"], "approval": true, "checks": ["unit", "compile", "secrets"]},
+    "RELEASE": {"next": null, "requires": ["TASK.md", "RELEASE.md"], "approval": true, "checks": []}
+  },
+  "checks": {
+    "unit": {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "timeout_seconds": 120},
+    "compile": {"command": ["python3", "-m", "compileall", "-q", "."], "timeout_seconds": 60},
+    "secrets": {
+      "command": ["git", "grep", "-nE", "(AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|password[[:space:]]*=[[:space:]]*[^$<{])"],
+      "timeout_seconds": 30,
+      "pass_exit_codes": [1]
+    }
+  },
+  "model": {"provider": "mock", "name": "mock", "base_url": "", "api_key_env": "AAOS_API_KEY"},
+  "agents": [
+    {
+      "name": "architect",
+      "run_tools": false,
+      "prompt": "Produce a compact plan: assumptions, boundaries, smallest useful deliverable, acceptance criteria. No code."
+    },
+    {
+      "name": "developer",
+      "run_tools": true,
+      "prompt": "Implement the smallest change that satisfies the acceptance criteria. Put any shell commands after a final line 'PROPOSED_COMMANDS:' one per line."
+    },
+    {
+      "name": "reviewer",
+      "run_tools": false,
+      "prompt": "Review the plan and implementation for correctness, security, and reversibility. State residual risk explicitly."
+    }
+  ],
+  "denied_command_patterns": [
+    "rm -rf",
+    "terraform destroy",
+    "kubectl delete",
+    "drop database",
+    "curl",
+    "wget",
+    ".env",
+    "/etc/passwd",
+    "/etc/shadow",
+    "git push",
+    "sudo"
+  ]
+}

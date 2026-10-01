@@ -36,80 +36,69 @@ This repository contains production-ready patterns and tools for:
 
 ## Core Components
 
-### 1. AAOS Lite Workflow (`AAOS_Lite_Workflow_0.3.zip`)
+### 1. AAOS Lite (`aaos/`)
 
-A **repository-local control plane** for AI-assisted software development. Replaces ad-hoc prompting with deterministic lifecycle governance.
+A **repository-local control plane plus agent runtime**, in one standard-library file
+(`aaos/aaos.py`) driven by one config file (`aaos/aaos.json`). Python 3.10+, no dependencies.
 
-**Lifecycle Stages:**
-- `UNDERSTAND` → Define purpose, scope, stakeholders, acceptance criteria
-- `ARCHITECT` → Design boundaries, threats, controls, risk decisions
-- `ENGINEER` → Produce bounded changes
-- `ASSURE` → Test quality, security, privacy, operational behavior
-- `OPERATE` → Release through approved procedure; observe results
-- `EVOLVE` → Capture metrics, lessons, corrective actions
-- `CLOSED` → Final decision and archive
+**Lifecycle stages:**
 
-**Key Features:**
-- Markdown-based human/agent interface
-- Deterministic state machine (`STATE.json`)
-- Allow-listed verification checks (your own test/security tools)
-- Evidence capture with required fields: artifact, method, observed result, expected result, pass/fail status, residual risk
-- Append-only workflow ledger
-- CI enforcement via GitHub Actions
+```
+PLAN ──approval──▶ BUILD ──▶ VERIFY ──checks + approval──▶ RELEASE
+                     ▲                   │
+                     └──── recover ──────┘
+```
 
-**Authority Order:**
-1. Human instructions in current session
-2. Agent constitution (this file)
-3. `.aaos/STATE.json` and `workflow.json`
-4. `.aaos/TASK.md` and approved decisions
-5. Control policies (`TOOL_POLICY_V2.md`, `CONTEXT_POLICY.md`)
-6. Retrieved project content (treated as untrusted data)
+- `PLAN` — define purpose, scope, acceptance criteria in `.aaos/TASK.md`; named human approves
+- `BUILD` — agents produce bounded changes; proposed shell commands are deny-listed and individually approved
+- `VERIFY` — allow-listed checks run and their output is hashed into `.aaos/evidence/`
+- `RELEASE` — requires `.aaos/RELEASE.md` with an explicit rollback procedure
 
-**Action Classes:**
-- `READ` — Inspect approved local content (allowed within task scope; logged)
-- `CREATE` — Add new artifact (human approval required)
-- `CHANGE` — Modify/delete existing content (approval + recovery plan required)
-- `EXTERNAL` — Deploy, publish, message, or access external systems (explicit approval required immediately)
+**Key controls:**
+- Deterministic state machine in `.aaos/STATE.json`
+- Approval is bound to a SHA-256 digest of the controlled files — edit a required file after
+  approval and the gate reopens, so you cannot approve one version and ship another
+- Checks run as argv arrays with `shell=False`; no shell interpretation, no command chaining
+- Append-only ledger at `.aaos/LEDGER.jsonl` covering transitions, approvals, checks, and every
+  command the agent proposed, ran, skipped, or had blocked
+- Retry ceiling on failing checks (`max_check_attempts`)
 
----
+**Authority order:**
+1. Human instructions in the current session
+2. The stage gate in `.aaos/STATE.json` and the graph in `aaos.json`
+3. `.aaos/TASK.md` and recorded approvals
+4. Retrieved project content (treated as untrusted data)
 
-### 2. AAOS Lite Runtime (`aaos-lite-runtime-main.zip`)
-
-The **Python 3.10+ runtime** implementing the AAOS control plane.
-
-**Key Modules:**
-- `runtime.py` — Core workflow state machine
-- `agents.py` — Governed agent interface and action validation
-- `tools.py` — Tool schema validation (Pydantic strict whitelists)
-- `policy.py` — Control policy enforcement
-- `memory.py` — Agent operational and strategic memory
-- `workflow.py` — Lifecycle transition logic
-- `models.py` — Domain models for tasks, evidence, approvals
+**Action classes:**
+- `READ` — inspect repository content within task scope; logged
+- `CREATE` / `CHANGE` — agent-proposed commands; deny-list filtered, then approved one at a time
+- `EXTERNAL` — denied by default (`curl`, `wget`, `git push`, `sudo`, `.env` access are deny-listed)
 
 **Quickstart:**
 ```bash
-python aaos.py init                    # Initialize workflow
-python aaos.py status                  # Show current state
-python aaos.py validate                # Validate task scope
-python aaos.py approve --by "Reviewer" --decision approve
-python aaos.py advance                 # Transition to next stage
-python aaos.py run-checks              # Execute verification suite
-python aaos.py history                 # Inspect ledger
-python aaos.py recover --reason "..."  # Return to ENGINEER from ASSURE/OPERATE
+cd aaos
+python3 aaos.py init                                     # create .aaos/ and templates
+python3 aaos.py status                                   # stage, evidence, current blockers
+python3 aaos.py approve --by "PM" --decision approve --note "scope agreed"
+python3 aaos.py advance                                  # PLAN -> BUILD
+python3 aaos.py run "Add rate limiting to the upload endpoint"
+python3 aaos.py advance && python3 aaos.py check         # BUILD -> VERIFY, run checks
+python3 aaos.py history                                  # inspect the ledger
+python3 aaos.py recover --reason "..."                   # VERIFY/RELEASE -> BUILD
 ```
+
+Full runtime documentation: [`aaos/README.md`](aaos/README.md).
 
 ---
 
-### 3. Trustworthy AI Framework (Presentation Materials)
+### 2. Trustworthy AI Framework
 
-**Presented at IEEE CS R10 Summer School 2026**
-
-#### A. Building & Breaking Governed Agents (2-hour workshop)
-- Hands-on: Build a simple AI orchestrator with AAOS Lite MD
-- Red-team exercise: Attempt to break governance (injection, tool misuse, context poisoning)
+#### A. Building & Breaking Governed Agents
+- Hands-on: build a simple AI orchestrator with AAOS Lite
+- Red-team exercise: attempt to break governance (injection, tool misuse, context poisoning)
 - Verify controls hold under adversarial conditions
 
-#### B. Driving Information Security Resilience Through Agentic AI (Executive/Architecture)
+#### B. Driving Information Security Resilience Through Agentic AI
 
 **Thesis:** Move from **periodic assurance** (events → evidence → reports) to **continuous, governed assurance** integrated into engineering.
 
@@ -195,37 +184,19 @@ USER OUTPUT
 
 ```
 trustworthy-ai/
-├── README.md                                          (this file)
-├── AAOS_Lite_Workflow_0.3.zip                        Control plane & governance
-│   ├── AAOS.md                                       Agent constitution
-│   ├── README.md                                     Implementation guide
-│   ├── aaos.py                                       CLI controller
-│   ├── workflow.json                                 Lifecycle definition
-│   ├── controls/                                     Policy templates
-│   └── templates/                                    Evidence templates
-│
-├── aaos-lite-runtime-main.zip                        Python runtime
-│   ├── aaos_lite/
-│   │   ├── runtime.py                               State machine
-│   │   ├── agents.py                                Governed agent interface
-│   │   ├── tools.py                                 Tool schema validation
-│   │   ├── policy.py                                Policy enforcement
-│   │   └── memory.py                                Operational memory
-│   └── examples/                                     Usage patterns
-│
-├── Trustworthy_AI_and_AAOS_Lite_MD_Merged.pptx       Technical deep-dive
-│   ├── Slide 1: TRUSTWORTHY AI overview
-│   ├── Slide 2–5: Trust as end-to-end property
-│   ├── Slide 6–10: AI security boundaries
-│   ├── Slide 11–17: AAOS Lite workflow & controls
-│   └── (17 slides total, ~60 min presentation)
-│
-└── Driving Information Security Resilience...pptx    Executive/Architecture
-    ├── Slide 1: Continuous vs. periodic assurance
-    ├── Slide 2–5: Business continuity reality
-    ├── Slide 6–12: Agentic AI as compliance orchestration
-    ├── Slide 13–17: Implementation roadmap & ROI
-    └── (17 slides total, ~45 min executive briefing)
+├── README.md              (this file)
+└── aaos/
+    ├── aaos.py            Control plane + agent runtime, standard library only
+    ├── aaos.json          Stage graph, checks, agents, model, deny-list
+    ├── README.md          Runtime documentation
+    └── .aaos/             Created by `aaos.py init`, git-ignored
+        ├── STATE.json     Current stage, evidence, approval
+        ├── LEDGER.jsonl   Append-only history
+        ├── TASK.md        Engagement contract
+        ├── RELEASE.md     Release and rollback record
+        ├── evidence/      Hashed check output
+        └── runs/          Agent transcripts
+```
 
 ---
 
@@ -233,175 +204,74 @@ trustworthy-ai/
 
 ### Prerequisites
 
-- **Python 3.10+** (3.11+ recommended for performance)
-- **Git** (for version control and CI/CD integration)
-- **PostgreSQL 14+** (optional, for multi-tenant deployments; SQLite for single-user dev)
-- **Docker** (optional, for containerized deployments and sandboxed execution)
+- **Python 3.10+** — that is the whole list; the runtime imports only the standard library
+- **Git** — for the `secrets` check and CI integration
 
-### Step 1: Clone or Fork This Repository
+### Step 1: Clone This Repository
 
 ```bash
 git clone https://github.com/thaaaru/trustworthy-ai.git
-cd trustworthy-ai
+cd trustworthy-ai/aaos
 ```
 
-### Step 2: Extract AAOS Lite Workflow
+### Step 2: Initialize the Workflow
 
 ```bash
-unzip AAOS_Lite_Workflow_0.3.zip -d ./aaos-workflow
-cd aaos-workflow
+python3 aaos.py init
+# Initialized at PLAN. Fill in .aaos/TASK.md next.
 ```
 
-Verify extraction:
-```bash
-ls -la
-# Expected output:
-# - AAOS.md (agent constitution)
-# - README.md (implementation guide)
-# - aaos.py (CLI controller)
-# - workflow.json (lifecycle state machine)
-# - controls/ (policy templates)
-# - templates/ (evidence templates)
-# - tests/ (test suite)
-```
+### Step 3: (Optional) Point It at a Real Model
 
-### Step 3: Extract AAOS Lite Runtime
+Agents run against a deterministic `mock` provider by default, so the entire lifecycle works
+offline. To use a real model, set the key in the environment and edit `aaos.json`:
 
 ```bash
-cd ..
-unzip aaos-lite-runtime-main.zip
-cd aaos-lite-runtime-main
+export AAOS_API_KEY=sk-...
 ```
 
-Verify extraction:
-```bash
-ls -la
-# Expected output:
-# - aaos_lite/ (Python package)
-# - examples/ (usage examples)
-# - requirements.txt (dependencies)
-# - README.md (runtime docs)
+```json
+"model": {
+  "provider": "openai_compatible",
+  "name": "gpt-4o-mini",
+  "base_url": "https://api.openai.com",
+  "api_key_env": "AAOS_API_KEY"
+}
 ```
 
-### Step 4: Set Up Python Environment
+Any OpenAI-compatible `/v1/chat/completions` endpoint works, including a local one. The key is
+read from the named environment variable only — never from config, never from the repository.
 
-```bash
-# Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+⚠️ **Never commit secrets.** The `secrets` check greps the working tree for AWS keys, GitLab
+PATs, private keys, and inline passwords, and fails the VERIFY gate when it finds them.
 
-# Upgrade pip
-pip install --upgrade pip
-
-# Install runtime dependencies
-pip install -r requirements.txt
-```
-
-**Core Dependencies:**
-- `pydantic>=2.0` — Strict schema validation (tools, inputs, outputs)
-- `langchain>=0.1` — LLM orchestration framework
-- `langfuse>=2.0` — Tracing and observability
-- `python-dotenv` — Environment variable management
-- `postgresql-psycopg` (optional) — Multi-tenant database
-- `opentelemetry-*` (optional) — Distributed tracing
-
-### Step 5: Configure Environment Variables
-
-Create a `.env` file in the project root:
+### Step 4: Verify Installation
 
 ```bash
-# Required
-ANTHROPIC_API_KEY=sk-ant-...              # Claude API key
-
-# Optional but recommended
-LANGFUSE_PUBLIC_KEY=pk-lf-...             # Langfuse tracing
-LANGFUSE_SECRET_KEY=sk-lf-...
-
-# Database (for multi-tenant)
-DATABASE_URL=postgresql://user:pass@localhost/trustworthy_ai
-
-# Observability
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-
-# Tool integrations (optional)
-TICKET_SYSTEM_API_KEY=...                 # For tool examples
+python3 aaos.py status
+# {"stage": "PLAN", "next": "BUILD", "approval_required": true, ... }
 ```
-
-⚠️ **Never commit `.env` to git.** Use a secrets manager in production (AWS Secrets Manager, HashiCorp Vault, etc.).
-
-### Step 6: Verify Installation
-
-```bash
-# Test AAOS CLI
-cd ../aaos-workflow
-python aaos.py status
-# Expected: "Workflow not initialized" or similar (this is normal)
-
-# Test Python runtime
-cd ../aaos-lite-runtime-main
-python -c "from aaos_lite import runtime; print('✓ AAOS Lite runtime loaded')"
-```
-
-### Step 7: (Optional) Set Up PostgreSQL for Multi-Tenant Mode
-
-```bash
-# Create database
-createdb trustworthy_ai
-
-# Run migrations (if present)
-psql -U postgres -d trustworthy_ai -a -f ./migrations/001_init.sql
-
-# Verify connection
-psql trustworthy_ai -c "SELECT version();"
-```
-
-### Step 8: (Optional) Configure GitHub Actions for CI/CD
-
-Copy the workflow enforcement file:
-
-```bash
-mkdir -p .github/workflows
-cp aaos-workflow/.github/workflows/aaos.yml .github/workflows/
-```
-
-This enforces AAOS workflow progression on all pull requests.
 
 ---
 
-## Docker Deployment (Optional)
+## CI Enforcement (Optional)
 
-For containerized deployments:
+Gate pull requests on the workflow state. Add `.github/workflows/aaos.yml`:
 
-```bash
-# Build image
-docker build -t trustworthy-ai:latest .
-
-# Run container with environment file
-docker run --env-file .env.prod \
-  -p 8000:8000 \
-  -v ./aaos-workflow/.aaos:/app/.aaos \
-  trustworthy-ai:latest
+```yaml
+name: aaos
+on: [pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 aaos/aaos.py status
+      - run: python3 aaos/aaos.py check
 ```
 
-**Example Dockerfile** (add to repo root):
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Copy runtime
-COPY aaos-lite-runtime-main/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application
-COPY aaos-lite-runtime-main/aaos_lite ./aaos_lite
-COPY aaos-workflow ./aaos-workflow
-
-EXPOSE 8000
-
-CMD ["python", "-m", "uvicorn", "aaos_lite.runtime:app", "--host", "0.0.0.0"]
-```
+`check` exits non-zero when any allow-listed check fails, so a failing gate fails the build.
+No container image or dependency installation step is required.
 
 ---
 
@@ -409,13 +279,12 @@ CMD ["python", "-m", "uvicorn", "aaos_lite.runtime:app", "--host", "0.0.0.0"]
 
 | Issue | Solution |
 |-------|----------|
-| `ModuleNotFoundError: No module named 'aaos_lite'` | Ensure virtual environment is activated and `pip install -r requirements.txt` completed |
-| `ANTHROPIC_API_KEY not found` | Create `.env` file with key; run `source .env` or use `python-dotenv` |
-| `psycopg connection failed` | Verify PostgreSQL is running; check `DATABASE_URL` in `.env` |
-| `aaos.py: command not found` | Run `python aaos.py` instead of `aaos.py` directly |
-| Permission denied on `.aaos/` directory | Run `chmod -R 755 .aaos/` or check file ownership |
-
----
+| `ERROR: not initialized` | Run `python3 aaos.py init` from the `aaos/` directory |
+| `BLOCKED: approval required at ...` | Record a decision: `python3 aaos.py approve --by "..." --decision approve --note "..."` |
+| `BLOCKED: approval stale` | A required file changed after approval; re-approve the current content |
+| `FAIL: unit` with no tests | Point the `unit` check in `aaos.json` at your own test command, or drop it from the stage |
+| `BLOCKED (pattern): <command>` | The agent proposed a deny-listed command; adjust `denied_command_patterns` only with a reason |
+| `ERROR: set AAOS_API_KEY` | Export the variable named by `model.api_key_env` |
 
 ---
 
@@ -424,87 +293,72 @@ CMD ["python", "-m", "uvicorn", "aaos_lite.runtime:app", "--host", "0.0.0.0"]
 ### 1. Initialize a New AI Project with AAOS Governance
 
 ```bash
-# Extract workflow controller
-unzip AAOS_Lite_Workflow_0.3.zip
-
-# Initialize the workflow
-python aaos.py init
+cd aaos
+python3 aaos.py init
 
 # Define your task in .aaos/TASK.md
 # Example:
-# - Purpose: Build a customer-support chatbot
-# - Scope: LLM integration, tool-calling (ticket lookup, FAQ search)
-# - Acceptance: Handles 5 customer personas; passes injection test suite
-# - Non-goals: Scheduling, financial transactions
+# - Requested outcome: a customer-support chatbot
+# - In scope: LLM integration, tool-calling (ticket lookup, FAQ search)
+# - Acceptance: handles 5 customer personas; passes the injection test suite
+# - Out of scope: scheduling, financial transactions
 
-python aaos.py validate                  # Check task completeness
-python aaos.py approve --by "PM" --decision approve --note "Scope accepted"
-python aaos.py advance                   # Move to ARCHITECT stage
+python3 aaos.py status                   # shows remaining blockers
+python3 aaos.py approve --by "PM" --decision approve --note "Scope accepted"
+python3 aaos.py advance                  # PLAN -> BUILD
 ```
 
 ### 2. Design Security & Controls
 
-In `.aaos/ARCHITECTURE.md`, define:
+In `.aaos/TASK.md`, before leaving PLAN, state:
 - **Data flows** (user input → model → tool → output)
 - **Threat model** (STRIDE or PASTA)
 - **Controls** (per-layer sanitization, idempotency, RLS)
 - **Audit strategy** (what to log, for how long, to where)
 
-### 3. Build with Runtime & Guardrails
+### 3. Build with Guardrails
 
 ```bash
-pip install pydantic langfuse langchain
-
-# Use aaos_lite.agents to wrap your LLM calls
-from aaos_lite.agents import GovernedAgent
-from aaos_lite.tools import validate_tool_call
-
-agent = GovernedAgent(
-    name="support_bot",
-    model="claude-opus-4.6",
-    tools=[lookup_ticket, search_faq],  # whitelist only needed tools
-    policies=["no_pii_in_logs", "idempotent_writes"]
-)
-
-# Calls are automatically:
-# - Input-sanitized (injection, PII)
-# - Tool-validated (strict schema, idempotency)
-# - Traced (Langfuse)
-# - Cost-tracked
-# - Recoverable (append-only ledger)
+python3 aaos.py run "Wrap the ticket lookup tool in a strict schema"
 ```
+
+Each configured agent runs in order and its output is written to `.aaos/runs/<timestamp>/`.
+Any command an agent proposes after `PROPOSED_COMMANDS:` is:
+
+- checked against `denied_command_patterns` and blocked outright on a match,
+- otherwise shown to you and run only on an explicit `y`,
+- recorded in `.aaos/LEDGER.jsonl` either way — blocked, skipped, or run with its exit code.
+
+Use `--no-tools` to run the agent chain with execution disabled entirely, and
+`--task-file path.md` to pass a task from a file.
 
 ### 4. Run Assurance Suite
 
 ```bash
-python aaos.py run-checks     # Execute allow-listed tests:
-                              # - Unit tests (function behavior)
-                              # - Security tests (injection, tool misuse)
-                              # - Compliance tests (data retention, RLS)
-                              # - Load tests (latency, cost)
+python3 aaos.py advance        # BUILD -> VERIFY
+python3 aaos.py check          # execute allow-listed checks: unit, compile, secrets
 
-# Review evidence in .aaos/evidence/
-# Approve evidence review
-python aaos.py approve --by "QA" --decision approve --note "All checks passing"
-python aaos.py advance         # Move to OPERATE
+# Review evidence in .aaos/evidence/, then approve it
+python3 aaos.py approve --by "QA" --decision approve --note "All checks passing"
+python3 aaos.py advance        # VERIFY -> RELEASE
 ```
 
-### 5. Deploy with Approval Trail
+Re-running `check` clears the prior approval, so evidence can never be approved before the
+run it refers to.
+
+### 5. Release with an Approval Trail
 
 ```bash
-python aaos.py approve --by "CTO" --decision approve --note "Ready for prod"
-python aaos.py operate                 # Deploy to production
-# Release procedure, health checks, and observation results recorded
+# Fill in .aaos/RELEASE.md: what ships, verification, rollback procedure
+python3 aaos.py approve --by "CTO" --decision approve --note "Ready for prod"
+python3 aaos.py status         # confirms the RELEASE gate is clean
 ```
 
 ### 6. Observe & Evolve
 
 ```bash
-python aaos.py history                 # Inspect full ledger
-# Capture metrics: uptime, latency, cost, security alerts
-# Identify lessons: what broke? What we'd do differently?
-# Close iteration cycle
-python aaos.py close --lessons "..." --actions "..."
+python3 aaos.py history        # inspect the full ledger
+python3 aaos.py recover --reason "latency regression in canary"   # back to BUILD
 ```
 
 ---
@@ -535,25 +389,15 @@ python aaos.py close --lessons "..." --actions "..."
 
 ## Learning Resources
 
-### Presentations (in this repo)
-1. **Trustworthy AI & AAOS Lite MD** (17 slides, ~60 min)
-   - Technical deep-dive on governance, controls, lifecycle
-   - Hands-on: build and break a governed agent
-
-2. **Driving Information Security Resilience Through Agentic AI** (17 slides, ~45 min)
-   - Executive/architect view of continuous assurance
-   - Business case: periodic → continuous assurance
-   - ROI and implementation roadmap
-
 ### Documentation
-- `AAOS.md` — Agent constitution (authority order, action classes, fail-closed conditions)
-- `workflow.json` — Lifecycle state machine, required gates, allowed transitions
-- `controls/TOOL_POLICY_V2.md` — Tool-calling security baseline
-- `controls/CONTEXT_POLICY.md` — LLM input/output sanitization rules
+- `aaos/README.md` — runtime documentation: stages, controls, configuration
+- `aaos/aaos.json` — the lifecycle state machine, check definitions, agents, and deny-list
+- `aaos/aaos.py` — the implementation; one file, no dependencies to audit through
 
-### Code Examples
-- `examples/vulnerability-dashboard.task.md` — End-to-end AAOS workflow for a security dashboard agent
-- `aaos_lite/` runtime — Production-ready Python 3.10+ implementation
+### Reading the Controls
+- Deny-list and per-command approval: `execute()` in `aaos.py`
+- Approval staleness binding: `digest()` and `validate()` in `aaos.py`
+- Evidence capture and hashing: `cmd_check()` in `aaos.py`
 
 ---
 
@@ -561,15 +405,16 @@ python aaos.py close --lessons "..." --actions "..."
 
 **Before Production Deployment:**
 
-- [ ] **UNDERSTAND stage:** Signed engagement contract (scope, stakeholders, acceptance criteria, non-goals)
-- [ ] **ARCHITECT stage:** Approved threat model and control design; risk decisions documented
-- [ ] **ENGINEER stage:** Change set complete; mapped to acceptance criteria; reviewed for correctness
-- [ ] **ASSURE stage:** All checks passing; evidence collected; security/privacy/ops tests green; no unresolved blockers
-- [ ] **OPERATE stage:** Human approval from different person than implementer; release procedure defined; deployment succeeded; observation results recorded
-- [ ] **Observability:** Langfuse tracing enabled; Prometheus/Datadog metrics; cost tracking active
+- [ ] **PLAN stage:** Engagement contract complete (requested outcome, scope, acceptance criteria, out-of-scope list); approved by a named human
+- [ ] **PLAN stage:** Threat model and control design documented; risk decisions recorded
+- [ ] **BUILD stage:** Change set complete; mapped to acceptance criteria; no deny-listed command was weakened to make it pass
+- [ ] **VERIFY stage:** All checks passing; evidence hashed in `.aaos/evidence/`; no unresolved blockers from `status`
+- [ ] **VERIFY stage:** Evidence approved by a different person than the implementer
+- [ ] **RELEASE stage:** `.aaos/RELEASE.md` states the rollback procedure and it has been rehearsed
+- [ ] **Observability:** Tracing enabled; metrics and cost tracking active
 - [ ] **Red-team:** Cats 1–4 automated (nightly); cats 5–6 scheduled (quarterly); CRITICAL/HIGH remediated
 - [ ] **Multi-tenant:** RLS verified; cross-tenant query test failing (as expected); audit logs showing tenant isolation
-- [ ] **Secrets:** No API keys in logs; vault rotation schedule set; PII redaction verified
+- [ ] **Secrets:** `secrets` check green; no API keys in logs; vault rotation schedule set; PII redaction verified
 - [ ] **SLA:** Uptime/latency/error/cost targets defined; alerting configured; escalation runbook ready
 
 ---
@@ -579,9 +424,9 @@ python aaos.py close --lessons "..." --actions "..."
 This is a **reference architecture + governance framework**, not a framework requiring pull requests. Organizations should:
 
 1. **Fork or clone** this repository into their codebase
-2. **Customize** `controls/`, `templates/`, and `workflow.json` to your threat model and compliance regime
-3. **Wire into your CI/CD** via `.github/workflows/aaos.yml`
-4. **Train your team** using the presentations and AAOS.md constitution
+2. **Customize** `aaos/aaos.json` — stage graph, check commands, agents, and deny-list — to your threat model and compliance regime
+3. **Wire into your CI/CD** so `aaos.py check` gates pull requests
+4. **Train your team** on the stage gates and the authority order above
 
 ---
 
@@ -594,10 +439,10 @@ This is a **reference architecture + governance framework**, not a framework req
 
 ## Support & Questions
 
-- **Policy violations or governance questions?** Consult `AAOS.md` (authority order, action classes, fail-closed conditions)
-- **Workflow state issues?** Run `python aaos.py status` and `python aaos.py history`
-- **Tool validation fails?** Review `controls/TOOL_POLICY_V2.md` and Pydantic schema validation
-- **Evidence gaps?** Templates are in `templates/`; use the evidence standard (artifact, method, observed, expected, pass/fail, residual risk, human decision)
+- **Governance questions?** The authority order and action classes are in the Core Components section above
+- **Workflow state issues?** Run `python3 aaos.py status` and `python3 aaos.py history`
+- **A command was blocked?** It matched `denied_command_patterns` in `aaos/aaos.json`; change it deliberately, with a reason
+- **Evidence gaps?** `init` writes `.aaos/TASK.md` and `.aaos/RELEASE.md`; evidence is captured automatically by `check` (artifact, status, exit code, command, SHA-256)
 
 ---
 

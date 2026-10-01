@@ -89,3 +89,6 @@ credentials.json
 *.key
 *.pem
 *.p12
+
+# AAOS runtime state
+aaos/.aaos/
