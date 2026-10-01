@@ -1,0 +1,8 @@
+{"at": "2026-10-01T02:16:18+00:00", "event": "INITIALIZED", "stage": "PLAN"}
+{"at": "2026-10-01T02:16:18+00:00", "by": "Tharaka", "decision": "approve", "event": "APPROVAL", "evidence_digest": "0d4792c8b43457e1f353cb4d55681743abf8722b84384b5a038618791d0c7bed", "note": "Scope agreed: single-file runtime, no binaries, no dependencies", "stage": "PLAN"}
+{"at": "2026-10-01T02:16:18+00:00", "event": "TRANSITION", "from": "PLAN", "to": "BUILD"}
+{"at": "2026-10-01T02:16:19+00:00", "event": "TRANSITION", "from": "BUILD", "to": "VERIFY"}
+{"at": "2026-10-01T02:16:19+00:00", "event": "CHECK", "name": "unit", "path": ".aaos/evidence/verify-unit-1.txt", "sha256": "7fe82202645d21cf5ac5050adede684e59cb0cf31b43788cd15fe5eae601999b", "stage": "VERIFY", "status": "PASS"}
+{"at": "2026-10-01T02:16:19+00:00", "event": "CHECK", "name": "compile", "path": ".aaos/evidence/verify-compile-1.txt", "sha256": "62987864f91068611027d3b7fc3af0071902fb5b1576e7cb033cb7f9e4aafd1a", "stage": "VERIFY", "status": "PASS"}
+{"at": "2026-10-01T02:16:19+00:00", "event": "CHECK", "name": "secrets", "path": ".aaos/evidence/verify-secrets-1.txt", "sha256": "20ac2da08c38ee54d4e9259717088a00438c30b0523fc086489711ee11884c87", "stage": "VERIFY", "status": "PASS"}
+{"at": "2026-10-01T02:16:19+00:00", "by": "Tharaka", "decision": "approve", "event": "APPROVAL", "evidence_digest": "c8b0f46dccc1573268f1a7e4d401c169e1afb6961691a2c73e3c2d05cf9eab73", "note": "unit, compile and secrets green on a clean tree", "stage": "VERIFY"}

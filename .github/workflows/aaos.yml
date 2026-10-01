@@ -1,0 +1,19 @@
+name: aaos
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Show workflow state
+        run: python3 aaos/aaos.py status
+      - name: Run allow-listed checks
+        run: python3 aaos/aaos.py check

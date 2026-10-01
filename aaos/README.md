@@ -63,7 +63,8 @@ export AAOS_API_KEY=sk-...
 
 Any OpenAI-compatible `/v1/chat/completions` endpoint works, including a local one.
 
-A check may declare `"requires_path": "tests"`. If that path is missing the check records
+A check may declare `"requires_path": "aaos/tests"` (paths are relative to the repository
+root, where checks run). If that path is missing the check records
 FAIL without running, rather than letting a tool silently resolve something else — bare
 `unittest discover -s tests` will happily import an unrelated installed `tests` package and
 report green, which is exactly the false assurance this runtime exists to prevent.

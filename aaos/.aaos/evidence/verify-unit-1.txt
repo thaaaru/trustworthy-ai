@@ -1,0 +1,10 @@
+check: unit
+status: PASS
+exit_code: 0
+command: ["python3", "-m", "unittest", "discover", "-s", "aaos/tests"]
+
+.....................
+----------------------------------------------------------------------
+Ran 21 tests in 0.003s
+
+OK

@@ -190,19 +190,27 @@ USER OUTPUT
 
 ```
 trustworthy-ai/
-├── README.md              (this file)
+├── README.md                  (this file)
+├── .github/workflows/aaos.yml CI: runs `status` and `check` on every pull request
 └── aaos/
-    ├── aaos.py            Control plane + agent runtime, standard library only
-    ├── aaos.json          Stage graph, checks, agents, model, deny-list
-    ├── README.md          Runtime documentation
-    └── .aaos/             Created by `aaos.py init`, git-ignored
-        ├── STATE.json     Current stage, evidence, approval
-        ├── LEDGER.jsonl   Append-only history
-        ├── TASK.md        Engagement contract
-        ├── RELEASE.md     Release and rollback record
-        ├── evidence/      Hashed check output
-        └── runs/          Agent transcripts
+    ├── aaos.py                Control plane + agent runtime, standard library only
+    ├── aaos.json              Stage graph, checks, agents, model, deny-list
+    ├── README.md              Runtime documentation
+    ├── POLICY.md              Tool and context policy, enforcement point named per rule
+    ├── tests/                 Tests for the stage graph, deny-list, digest, and gate
+    ├── examples/              A worked task record
+    └── .aaos/                 Created by `aaos.py init`; tracked, except `runs/`
+        ├── STATE.json         Current stage, evidence, approval
+        ├── LEDGER.jsonl       Append-only history
+        ├── TASK.md            Engagement contract
+        ├── RELEASE.md         Release and rollback record
+        ├── evidence/          Hashed check output
+        └── runs/              Agent transcripts (git-ignored, regenerable)
 ```
+
+This repository is governed by its own runtime: `aaos/.aaos/TASK.md` is the contract for the
+change that produced it, and `aaos/.aaos/evidence/` holds the hashed check output behind the
+recorded approval. Run `python3 aaos/aaos.py status` on a fresh clone to see the live gate.
 
 ---
 
@@ -294,7 +302,7 @@ build. No container image and no dependency installation step is required.
 | `ERROR: not initialized` | Run `python3 aaos.py init` from the `aaos/` directory |
 | `BLOCKED: approval required at ...` | Record a decision: `python3 aaos.py approve --by "..." --decision approve --note "..."` |
 | `BLOCKED: approval stale` | A required file changed after approval; re-approve the current content |
-| `FAIL: unit` and the evidence says `required path 'tests' does not exist` | A check declaring `requires_path` fails instead of running when that path is missing, so it cannot report green on someone else's installed package. Create `tests/`, or remove `unit` from the stage in `aaos.json` |
+| `FAIL: unit` and the evidence says `required path 'aaos/tests' does not exist` | A check declaring `requires_path` fails instead of running when that path is missing, so it cannot report green on someone else's installed package. Restore `aaos/tests/`, or remove `unit` from the stage in `aaos.json` |
 | `FAIL: <name> (retry limit exceeded)` | The check has been attempted more than `max_check_attempts` times at this stage; advance or `recover` to reset the counters |
 | `BLOCKED (pattern): <command>` | The agent proposed a deny-listed command; adjust `denied_command_patterns` only with a reason |
 | `ERROR: set AAOS_API_KEY` | Export the variable named by `model.api_key_env` |
@@ -404,13 +412,17 @@ python3 aaos.py recover --reason "latency regression in canary"   # back to BUIL
 
 ### Documentation
 - `aaos/README.md` — runtime documentation: stages, controls, configuration
+- `aaos/POLICY.md` — tool and context policy; each rule names where it is enforced, or says it is judgement
 - `aaos/aaos.json` — the lifecycle state machine, check definitions, agents, and deny-list
 - `aaos/aaos.py` — the implementation; one file, no dependencies to audit through
+- `aaos/examples/vulnerability-dashboard.task.md` — a worked task record you can run
 
 ### Reading the Controls
 - Deny-list and per-command approval: `execute()` in `aaos.py`
 - Approval staleness binding: `digest()` and `validate()` in `aaos.py`
 - Evidence capture and hashing: `cmd_check()` in `aaos.py`
+- A check refusing to run when its subject is absent: `requires_path` in `cmd_check()`
+- What each control is asserted to do: `aaos/tests/test_aaos.py`
 
 ---
 
