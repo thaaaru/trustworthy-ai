@@ -70,10 +70,9 @@ Thumbs.db
 ~$*.xlsx
 .~*
 
-# AAOS workflow state (keep in repo but mark as local)
-.aaos/STATE.json
-.aaos/evidence/*
-!.aaos/evidence/.gitkeep
+# AAOS workflow state: the audit trail is tracked on purpose.
+# Only agent transcripts are excluded, since they are regenerable and can be large.
+aaos/.aaos/runs/
 
 # Node modules (if using JS tools)
 node_modules/
@@ -90,5 +89,4 @@ credentials.json
 *.pem
 *.p12
 
-# AAOS runtime state
-aaos/.aaos/
+

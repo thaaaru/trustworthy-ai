@@ -10,7 +10,7 @@
     "RELEASE": {"next": null, "requires": ["TASK.md", "RELEASE.md"], "approval": true, "checks": []}
   },
   "checks": {
-    "unit": {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "timeout_seconds": 120},
+    "unit": {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "requires_path": "tests", "timeout_seconds": 120},
     "compile": {"command": ["python3", "-m", "compileall", "-q", "."], "timeout_seconds": 60},
     "secrets": {
       "command": ["git", "grep", "-nE", "(AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|password[[:space:]]*=[[:space:]]*[^$<{])"],

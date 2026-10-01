@@ -63,6 +63,11 @@ export AAOS_API_KEY=sk-...
 
 Any OpenAI-compatible `/v1/chat/completions` endpoint works, including a local one.
 
+A check may declare `"requires_path": "tests"`. If that path is missing the check records
+FAIL without running, rather than letting a tool silently resolve something else — bare
+`unittest discover -s tests` will happily import an unrelated installed `tests` package and
+report green, which is exactly the false assurance this runtime exists to prevent.
+
 ## Controls worth knowing
 
 | Control | Where |
@@ -71,6 +76,7 @@ Any OpenAI-compatible `/v1/chat/completions` endpoint works, including a local o
 | Per-command human approval | `execute()` — prompts unless `--no-tools` |
 | Checks cannot be shell-injected | `subprocess.run(..., shell=False)` with argv arrays |
 | Approval cannot go stale | `digest()` over required files + passed evidence |
+| Checks cannot report false green | `requires_path` fails the check when its subject is absent |
 | Retry limit on failing checks | `max_check_attempts` |
 | Full audit trail | `.aaos/LEDGER.jsonl`, append-only |
 

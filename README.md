@@ -117,7 +117,13 @@ Full runtime documentation: [`aaos/README.md`](aaos/README.md).
 
 ## Security & Compliance Architecture
 
-### Layered Input/Output Sanitization
+> **Scope note.** This section is the reference architecture this framework argues for — the
+> design you build *around* a governed runtime. It is **not** a description of `aaos/aaos.py`,
+> which implements the lifecycle gate, the agent loop, and the controls listed under
+> [Core Components](#1-aaos-lite-aaos) and nothing else. Sanitization layers, schema
+> validation, tenant isolation, and tracing below are your integration work.
+
+### Layered Input/Output Sanitization (target architecture)
 
 ```
 USER INPUT
@@ -141,7 +147,7 @@ MODEL CALL
 USER OUTPUT
 ```
 
-### Tool/Agent Control Model
+### Tool/Agent Control Model (target architecture)
 
 **Whitelisting & Idempotency:**
 - Pydantic strict schemas (no open-ended string tools)
@@ -158,7 +164,7 @@ USER OUTPUT
 - Fail-open on transient errors (with exponential backoff)
 - Retry budgets enforced per request
 
-### Observability & Cost Tracking
+### Observability & Cost Tracking (target architecture)
 
 - **OpenTelemetry** on every LLM call, tool call, retrieval
 - **Langfuse** for trace inspection, cost attribution, latency SLOs
@@ -166,7 +172,7 @@ USER OUTPUT
 - **Model fallback chains** (Opus → Sonnet → Haiku) to degrade before failing
 - **Prompt caching** always enabled (system + tools + few-shot)
 
-### Red-Teaming & Assurance
+### Red-Teaming & Assurance (target architecture)
 
 **Automated Categories (nightly):**
 1. **Injection** — Direct injection, context poisoning, role-play hijack, tool-arg injection
@@ -256,7 +262,12 @@ python3 aaos.py status
 
 ## CI Enforcement (Optional)
 
-Gate pull requests on the workflow state. Add `.github/workflows/aaos.yml`:
+The gate lives in `.aaos/STATE.json`, so CI can only read it if that state is committed.
+`.gitignore` keeps `aaos/.aaos/runs/` (agent transcripts) out of the repository and tracks
+the rest — `STATE.json`, `LEDGER.jsonl`, `TASK.md`, `RELEASE.md`, `evidence/` — because the
+audit trail is the deliverable.
+
+Add `.github/workflows/aaos.yml`:
 
 ```yaml
 name: aaos
@@ -270,8 +281,9 @@ jobs:
       - run: python3 aaos/aaos.py check
 ```
 
-`check` exits non-zero when any allow-listed check fails, so a failing gate fails the build.
-No container image or dependency installation step is required.
+Both commands exit non-zero when the workflow has not been initialized, when a stage has no
+checks configured, or when any allow-listed check fails — so an ungoverned branch fails the
+build. No container image and no dependency installation step is required.
 
 ---
 
@@ -282,7 +294,8 @@ No container image or dependency installation step is required.
 | `ERROR: not initialized` | Run `python3 aaos.py init` from the `aaos/` directory |
 | `BLOCKED: approval required at ...` | Record a decision: `python3 aaos.py approve --by "..." --decision approve --note "..."` |
 | `BLOCKED: approval stale` | A required file changed after approval; re-approve the current content |
-| `FAIL: unit` with no tests | Point the `unit` check in `aaos.json` at your own test command, or drop it from the stage |
+| `FAIL: unit` and the evidence says `required path 'tests' does not exist` | A check declaring `requires_path` fails instead of running when that path is missing, so it cannot report green on someone else's installed package. Create `tests/`, or remove `unit` from the stage in `aaos.json` |
+| `FAIL: <name> (retry limit exceeded)` | The check has been attempted more than `max_check_attempts` times at this stage; advance or `recover` to reset the counters |
 | `BLOCKED (pattern): <command>` | The agent proposed a deny-listed command; adjust `denied_command_patterns` only with a reason |
 | `ERROR: set AAOS_API_KEY` | Export the variable named by `model.api_key_env` |
 

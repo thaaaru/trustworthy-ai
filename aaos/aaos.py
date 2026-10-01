@@ -262,13 +262,20 @@ def cmd_check(cfg: dict, args) -> None:
             print(f"FAIL: {name} (retry limit exceeded)")
             failed = True
             continue
-        try:
-            result = subprocess.run(spec["command"], cwd=ROOT.parent, capture_output=True, text=True,
-                                    timeout=spec.get("timeout_seconds", 120), shell=False)
-            ok = result.returncode in spec.get("pass_exit_codes", [0])
-            output, code = result.stdout + result.stderr, result.returncode
-        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-            ok, output, code = False, str(exc), -1
+        needed = spec.get("requires_path")
+        if needed and not (ROOT.parent / needed).exists():
+            ok, output, code = False, (
+                f"required path {needed!r} does not exist, so this check cannot produce evidence.\n"
+                f"Create it, or remove {name!r} from the stage in aaos.json."
+            ), -1
+        else:
+            try:
+                result = subprocess.run(spec["command"], cwd=ROOT.parent, capture_output=True, text=True,
+                                        timeout=spec.get("timeout_seconds", 120), shell=False)
+                ok = result.returncode in spec.get("pass_exit_codes", [0])
+                output, code = result.stdout + result.stderr, result.returncode
+            except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+                ok, output, code = False, str(exc), -1
         status = "PASS" if ok else "FAIL"
         artifact = EVIDENCE / f"{value['stage'].lower()}-{name}-{attempts[name]}.txt"
         artifact.write_text(f"check: {name}\nstatus: {status}\nexit_code: {code}\n"
