@@ -1,0 +1,7 @@
+check: unit
+status: FAIL
+exit_code: -1
+command: ["python3", "-m", "unittest", "discover", "-s", "aaos/tests"]
+
+required path 'aaos/tests' does not exist, so this check cannot produce evidence.
+Create it, or remove 'unit' from the stage in aaos.json.

@@ -1,0 +1,5 @@
+check: compile
+status: PASS
+exit_code: 0
+command: ["python3", "-m", "compileall", "-q", "."]
+

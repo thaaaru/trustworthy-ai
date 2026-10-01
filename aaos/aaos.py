@@ -125,8 +125,9 @@ def digest(paths: list[Path]) -> str:
 
 
 def controlled(rule: dict, value: dict) -> list[Path]:
-    passed = [ROOT / item["path"] for item in value.get("evidence", []) if (ROOT / item["path"]).is_file()]
-    return required_files(rule) + passed
+    # Suppressed checks record a FAIL with no artifact, so path may be None.
+    paths = [ROOT / item["path"] for item in value.get("evidence", []) if item.get("path")]
+    return required_files(rule) + [path for path in paths if path.is_file()]
 
 
 def validate(cfg: dict, value: dict) -> list[str]:
@@ -260,6 +261,11 @@ def cmd_check(cfg: dict, args) -> None:
         attempts[name] = attempts.get(name, 0) + 1
         if attempts[name] > cfg["max_check_attempts"]:
             print(f"FAIL: {name} (retry limit exceeded)")
+            log("CHECK_SUPPRESSED", stage=value["stage"], name=name,
+                attempts=attempts[name], limit=cfg["max_check_attempts"])
+            value["evidence"].append({"name": name, "status": "FAIL", "path": None,
+                                      "sha256": None, "at": now(),
+                                      "reason": "retry limit exceeded"})
             failed = True
             continue
         needed = spec.get("requires_path")

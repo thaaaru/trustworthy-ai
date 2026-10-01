@@ -140,6 +140,16 @@ class GateValidationTests(unittest.TestCase):
         errors = AAOS.validate(CONFIG, state)
         self.assertTrue(any("check not passed: unit" in item for item in errors))
 
+    def test_suppressed_check_evidence_without_an_artifact_is_handled(self):
+        # A check stopped by the retry ceiling records FAIL with path None.
+        state = self.make_state("VERIFY", evidence=[
+            {"name": "unit", "status": "FAIL", "path": None, "sha256": None,
+             "reason": "retry limit exceeded"}])
+        rule = AAOS.gate(CONFIG, state)
+        AAOS.controlled(rule, state)  # must not raise on a null artifact path
+        errors = AAOS.validate(CONFIG, state)
+        self.assertTrue(any("check not passed: unit" in item for item in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
